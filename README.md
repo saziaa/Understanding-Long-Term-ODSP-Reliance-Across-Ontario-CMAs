@@ -1,4 +1,4 @@
-# Understanding Long-Term ODSP Reliance Across Ontario CMAs
+# Understanding Long-Term ODSP Reliance Across Ontario CMAs(2003-2024)
 A Policy-Focused Data Analysis & Forecasting Project
 
 ## 📌 Purpose
@@ -22,7 +22,7 @@ This analysis addresses five policy-relevant questions:
 
 ## 🛢️ Data Overview
 
-- **Source**: [Government of Canada – Open Data Portal](https://open.canada.ca/data/dataset/19474e66-26f5-4af4-8e21-f26c81ea84b1?utm_source=chatgpt.com)  
+- **Source**: [Government of Canada – Open Data Portal](https://open.canada.ca/data/dataset/19474e66-26f5-4af4-8e21-f26c81ea84b1?)  
 - **Coverage**: 2003–2024  
 - **Geography**: 15 Census Metropolitan Areas (CMAs) in Ontario  
 
