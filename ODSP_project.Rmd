@@ -1,0 +1,955 @@
+---
+title: "ODSP project"
+author: "Sazia Afreen"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r }
+# ---------------------------------
+# One-time R library configuration
+# ---------------------------------
+
+# Define personal library path
+user_lib <- "C:/Users/safre/R_new_library"
+
+# Create library folder if it doesn't exist
+if (!dir.exists(user_lib)) {
+  dir.create(user_lib, recursive = TRUE)
+}
+
+# Add library path (for this session)
+.libPaths(user_lib)
+
+# Install required packages (only if missing)
+required_packages <- c(
+  "dplyr", "ggplot2", "readr", "tidyr",
+  "stringr", "lubridate", "forcats",
+  "rlang", "tibble", "pillar", "vctrs","janitor","tidyverse"
+)
+
+installed <- rownames(installed.packages())
+to_install <- setdiff(required_packages, installed)
+
+if (length(to_install) > 0) {
+  install.packages(to_install, lib = user_lib, dependencies = TRUE)
+}
+
+# Load packages
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+message("✅ R library setup complete.")
+
+
+```
+
+
+```{r}
+file.edit("~/.Rprofile")
+
+```
+
+```{r}
+.libPaths("C:/Users/safre/R_new_library")
+
+```
+
+
+```{r}
+# Load Data
+odsp <- read_csv("D:/ODSP_Project/ODSP_CMA.csv")
+
+# Initial structure and distribution check
+glimpse(odsp)
+summary(odsp)
+
+```
+
+```{r}
+# Dropping empty columns: Column ...20 is fully empty and not used in reporting
+odsp <- odsp %>% select(-...20)
+
+```
+
+```{r}
+# Column-level missingness assessment
+colSums(is.na(odsp))
+round(colMeans(is.na(odsp)) * 100, 2)
+
+```
+
+```{r}
+odsp_clean <- odsp %>%
+  filter(rowSums(is.na(.)) < ncol(.))
+
+# Inspect distribution of missingness across rows
+odsp %>%
+  mutate(na_count = rowSums(is.na(.))) %>%
+  count(na_count)
+
+```
+
+```{r}
+#  Standardize column names and derive time variables
+odsp_clean <- odsp %>%
+  clean_names() %>%
+  mutate(
+    cma = str_trim(str_remove(cma, "^[0-9]+\\s?-\\s?")),
+    year = floor(month / 100),
+    month_num = month %% 100,
+    date = make_date(year, month_num, 1)
+  )
+
+```
+
+```{r}
+#Rename the columns 
+odsp_clean <- odsp_clean %>% rename( cma_name = cma, 
+                                     total_cases = cases, 
+                                     single = fts, 
+                                     single_parent = ftsp, 
+                                     couple = ftc, 
+                                     family_size_1 = fs1, 
+                                     family_size_2 = fs2, 
+                                     family_size_3_plus = fs3, 
+                                     age_24_or_less = age24, 
+                                     age_25_to_54 = age2554, 
+                                     age_55_plus = age55, 
+                                     male_applicant = male, 
+                                     female_applicant = female, 
+                                     months_0_35 = moa035, 
+                                     months_36_59 = moa3659, 
+                                     months_60_plus = moa60 ) 
+
+#Normalize cma_name 
+odsp_clean <- odsp_clean %>% mutate( cma_name = gsub("--", "-", cma_name), 
+                                     cma_name = trimws(cma_name) )
+
+# Remove incomplete year 2025
+odsp_clean <- odsp_clean %>%
+  filter(year < 2025)
+
+```
+
+```{r}
+# Aggregate monthly records to annual CMA-level summaries
+# Compute annual sum by CMA 
+
+odsp_annual <- odsp_clean %>% 
+  group_by(year, cma_code, cma_name) %>% 
+  summarise( total_cases = sum(total_cases, na.rm = TRUE), 
+
+  # household structure 
+  single = sum(single), 
+  single_parent = sum(single_parent), 
+  couple = sum(couple), 
+  family_size_1 = sum(family_size_1), 
+  family_size_2 = sum(family_size_2), 
+  family_size_3_plus = sum(family_size_3_plus), 
+
+  # age groups 
+  age_24_or_less = sum(age_24_or_less), 
+  age_25_to_54 = sum(age_25_to_54), 
+  age_55_plus = sum(age_55_plus), 
+
+  # gender 
+  male_applicant = sum(male_applicant), 
+  female_applicant = sum(female_applicant), 
+
+  # duration buckets 
+  months_0_35 = sum(months_0_35), 
+  months_36_59 = sum(months_36_59), 
+  months_60_plus = sum(months_60_plus), .groups = "drop" )
+
+```
+
+```{r}
+# Proportions should sum correctly 
+summary(odsp_annual$total_cases) 
+
+# Approximate average duration using midpoint assumptions for duration buckets 
+odsp_annual <- odsp_annual %>% 
+  mutate( avg_months = ( months_0_35 * 17.5 + months_36_59 * 47.5 + months_60_plus * 72 ) / total_cases ) 
+
+# Create normalized demographic proportions for cross-CMA comparability
+odsp_annual <- odsp_annual %>% 
+  mutate( prop_single = single / total_cases, 
+          prop_single_parent = single_parent / total_cases, 
+          prop_couple = couple / total_cases, 
+          prop_age_24_or_less = age_24_or_less / total_cases, 
+          prop_age_25_to_54 = age_25_to_54 / total_cases, 
+          prop_age_55_plus = age_55_plus / total_cases ) 
+
+# Validate household proportions sum to 1
+odsp_annual <- odsp_annual %>% 
+  mutate( household_prop_sum = prop_single + prop_single_parent + prop_couple ) 
+
+summary(odsp_annual$household_prop_sum)
+```
+
+```{r}
+odsp_annual <- odsp_annual %>%
+  filter(!is.na(year), !is.na(cma_name))
+
+```
+
+```{r}
+# Validate expected temporal and geographic coverage
+nrow(odsp_annual)
+n_distinct(odsp_annual$year)
+n_distinct(odsp_annual$cma_name)
+
+# Validate demographic totals against total cases
+summary(
+  odsp_annual$single +
+  odsp_annual$single_parent +
+  odsp_annual$couple -
+  odsp_annual$total_cases
+)
+
+```
+# ======================
+# EXPLORATORY DATA ANALYSIS
+# ======================
+ 
+# Q1. How has average ODSP duration evolved over time?
+
+```{r}
+# Unweighted CMA-average duration (each CMA contributes equally)
+trend_unweighted <- odsp_annual %>%
+  group_by(year) %>%
+  summarise(
+    avg_months_unweighted = mean(avg_months, na.rm = TRUE)
+  )
+
+```
+
+```{r}
+# Case-weighted average duration (reflects population-level burden)
+trend_weighted <- odsp_annual %>%
+  group_by(year) %>%
+  summarise(
+    avg_months_weighted =
+      sum(avg_months * total_cases, na.rm = TRUE) /
+      sum(total_cases, na.rm = TRUE)
+  )
+
+```
+
+```{r}
+# Combine & compare
+trend_compare <- left_join(
+  trend_unweighted,
+  trend_weighted,
+  by = "year"
+)
+
+```
+
+```{r}
+# Visualization
+# Weighted trend reflects system-wide duration burden;
+# unweighted trend used for diagnostic comparison only
+
+ggplot(trend_compare, aes(x = year)) +
+  geom_line(aes(y = avg_months_unweighted), linetype = "dashed") +
+  geom_line(aes(y = avg_months_weighted)) +
+  geom_point(aes(y = avg_months_weighted)) +
+  labs(
+    title = "Trend in Average ODSP Duration Over Time",
+    subtitle = "Unweighted vs Case-Weighted Averages",
+    y = "Average Months on ODSP",
+    x = "Year"
+  )
+
+```
+Average ODSP duration declined between 2003 and 2009, stabilized through the early 2010s, and increased steadily from 2015 onward. The case-weighted trend closely mirrors the unweighted trend but remains consistently lower, indicating that higher-volume CMAs tend to have slightly shorter average durations.
+
+#Q2. How has the total ODSP caseload evolved over time, and how does this contextualize duration trends?
+
+```{r}
+# System-wide ODSP caseload over time
+cases_trend <- odsp_annual %>%
+  group_by(year) %>%
+  summarise(
+    total_cases = sum(total_cases, na.rm = TRUE)
+  )
+
+```
+
+```{r}
+# Visualization
+ggplot(cases_trend, aes(x = year, y = total_cases)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Total ODSP Caseload Over Time",
+    y = "Total Cases",
+    x = "Year"
+  )
+
+```
+Total ODSP caseload increased steadily from 2003 to 2020, nearly doubling over the period, before stabilizing in subsequent years. Notably, average duration continued to rise even as caseload growth slowed after 2020, indicating increasing long-term reliance among existing recipients rather than caseload expansion alone.
+
+
+# Q3. How does ODSP duration vary across CMAs, and which regions contribute most to long-term stays?
+
+```{r}
+# Weighted average duration reflects contribution of each CMA to long-term ODSP stays
+cma_duration_weighted <- odsp_annual %>%
+  group_by(cma_name) %>%
+  summarise(
+    avg_months_weighted = sum(avg_months * total_cases) / sum(total_cases),
+    total_cases_sum = sum(total_cases)
+  ) %>%
+  arrange(desc(avg_months_weighted))
+
+```
+
+```{r}
+cma_duration_weighted <- cma_duration_weighted %>%
+  mutate(
+    contribution = avg_months_weighted * total_cases_sum
+  )
+cma_duration_weighted 
+```
+```{r}
+# Recompute avg_months_weighted 
+odsp_annual <- odsp_annual %>%
+  mutate(
+    avg_months_weighted = (
+      months_0_35 * 17.5 +
+      months_36_59 * 47.5 +
+      months_60_plus * 72
+    ) / total_cases
+  )
+
+```
+
+```{r}
+odsp_annual <- odsp_annual %>%
+  mutate(
+    contribution = avg_months_weighted * total_cases
+  )
+
+```
+
+
+```{r}
+# Compute medians
+median_duration <- median(odsp_annual$avg_months_weighted, na.rm = TRUE)
+median_contribution <- median(odsp_annual$contribution, na.rm = TRUE)
+
+# Assign segments
+odsp_annual <- odsp_annual %>%
+  mutate(
+    segment = case_when(
+      avg_months_weighted > median_duration & contribution > median_contribution ~ "High Contribution - High Duration",
+      avg_months_weighted <= median_duration & contribution > median_contribution ~ "High Contribution - Lower Duration",
+      avg_months_weighted > median_duration & contribution <= median_contribution ~ "Low Contribution - High Duration",
+      TRUE ~ "Low Contribution - Lower Duration"
+    )
+  )
+
+table(odsp_annual$segment)
+
+```
+Using median-based thresholds for average weighted duration on ODSP and cumulative case-months (“contribution”), CMAs were segmented into four groups reflecting differences in program persistence and system burden. This approach enables a clear distinction between CMAs where ODSP pressure is driven primarily by scale and those where longer durations contribute more substantially to cumulative system impact. The resulting segments highlight distinct operational and policy considerations across regions.
+
+Segment 1: High Contribution – High Duration (Hamilton, Ottawa–Gatineau, St. Catharines–Niagara)
+
+Structural Persistence Hotspots
+
+CMAs in this segment exhibit both high cumulative case-months and longer average durations on ODSP,far more than the median. These areas contribute disproportionately to overall system burden and are characterized by persistent program attachment. Interventions in these CMAs are likely to require coordinated, long-term approaches addressing employment barriers, health complexity, and service integration.
+
+Segment 2: High Contribution – Lower Duration (Toronto,London,Windsor,Kitchener–Cambridge–Waterloo, Oshawa)
+
+Volume-Driven System Load
+
+This segment includes CMAs with large cumulative contributions driven primarily by high caseload volumes. While average time on assistance is at or below median, the scale of participation results in substantial system pressure. Policy levers in these CMAs may focus on case management efficiency, service throughput, and timely transitions off assistance.
+
+Segment 3: Low Contribution – High Duration(Greater Sudbury,Kingston,Thunder Bay,Brantford,Peterborough)
+
+Chronic but Small-Scale CMAs
+
+CMAs in this group are characterized by consistantly high durations on ODSP but relatively low cumulative system contribution due to smaller caseloads. Although these areas do not represent major cost drivers at the provincial level, they raise important equity considerations related to persistent need, service accessibility, and regional labour market conditions.
+
+Segment 4: Low Contribution – Lower Duration (Guelph,Barrie)
+
+Comparative Benchmarks
+
+This segment comprises CMAs with minimal cumulative contributions and below median durations on ODSP. These areas may reflect more effective exit pathways or favourable local conditions. As such, they provide useful benchmarks for identifying practices or contextual factors that may be transferable to higher-burden CMAs.
+
+
+# Q4. Which demographic compositions are associated with longer ODSP duration?
+
+```{r}
+# Aggregate by segment
+demographics_by_segment <- odsp_annual %>%
+  group_by(segment) %>%
+  summarise(
+    prop_single = mean(prop_single, na.rm = TRUE),
+    prop_single_parent = mean(prop_single_parent, na.rm = TRUE),
+    prop_couple = mean(prop_couple, na.rm = TRUE),
+    prop_age_24_or_less = mean(prop_age_24_or_less, na.rm = TRUE),
+    prop_age_25_to_54 = mean(prop_age_25_to_54, na.rm = TRUE),
+    prop_age_55_plus = mean(prop_age_55_plus, na.rm = TRUE),
+    prop_male = mean(male_applicant / total_cases, na.rm = TRUE),
+    prop_female = mean(female_applicant / total_cases, na.rm = TRUE)
+  )
+
+```
+
+```{r}
+demographics_by_segment
+
+```
+
+```{r}
+library(tidyr)
+# Prepare data for stacked bar plot
+# Household type
+household_long <- demographics_by_segment %>%
+  select(segment, prop_single, prop_single_parent, prop_couple) %>%
+  pivot_longer(cols = starts_with("prop"), 
+               names_to = "household_type",
+               values_to = "proportion") %>%
+  mutate(household_type = case_when(
+    household_type == "prop_single" ~ "Single",
+    household_type == "prop_single_parent" ~ "Single Parent",
+    household_type == "prop_couple" ~ "Couple"
+  ))
+
+```
+
+
+Single households dominate ODSP participation across all segments; we focus on the smaller groups to highlight differential patterns.
+
+```{r}
+# Only plot Single Parent and Couple
+ggplot(household_long_filtered,
+       aes(x = segment, y = proportion, fill = household_type)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.7) +
+  scale_fill_manual(values = c(
+    "Single Parent" = "#C6DBEF",  # light blue
+    "Couple"        = "#FDD0A2"   # light orange
+  )) +
+  labs(
+    title = "Household Composition of Non-Single Cases by CMA Segment",
+    x = "CMA Segment",
+    y = "Proportion",
+    fill = "Household Type"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    panel.grid.major.y = element_blank()
+  ) +
+  coord_flip()
+
+
+
+```
+```{r}
+# Reshape for age groups
+age_long <- demographics_by_segment %>%
+  select(segment, prop_age_24_or_less, prop_age_25_to_54, prop_age_55_plus) %>%
+  pivot_longer(cols = starts_with("prop_age"),
+               names_to = "age_group",
+               values_to = "proportion") %>%
+  mutate(age_group = case_when(
+    age_group == "prop_age_24_or_less" ~ "Age ≤ 24",
+    age_group == "prop_age_25_to_54" ~ "Age 25-54",
+    age_group == "prop_age_55_plus" ~ "Age 55+"
+  ))
+
+
+# Combine Age <=24 with Age 25-54
+age_long_filtered <- age_long %>%
+  mutate(age_group_simple = ifelse(age_group == "Age 55+", "Age 55+", "Age ≤54")) %>%
+  group_by(segment, age_group_simple) %>%
+  summarise(proportion = sum(proportion), .groups = "drop")
+# Plot
+ggplot(age_long_filtered,
+       aes(x = segment, y = proportion, fill = age_group_simple)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.7) +
+  scale_fill_manual(values = c(
+    "Age ≤54" = "#D9F0D3",  # very light green
+    "Age 55+" = "#A6BDD8"  # soft blue
+  )) +
+  labs(
+    title = "Age Composition by CMA Segment (Simplified)",
+    x = "CMA Segment",
+    y = "Proportion",
+    fill = "Age Group"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    panel.grid.major.y = element_blank()
+  ) +
+  coord_flip()
+
+
+```
+Across all CMA segments, ODSP participation is overwhelmingly dominated by single-adult households, accounting for approximately 78–80% of cases regardless of contribution or duration category. To improve interpretability, subsequent analysis focuses on non-single household types and simplified age groups.
+
+Among non-single households, couples and single-parent families together represent less than one-quarter of cases in every segment, with only modest variation across contribution–duration categories. This suggests that differences in system burden across CMAs are not driven by household structure, but rather by scale and persistence of single-adult cases.
+
+Age composition shows a consistent concentration in the working-age population (≤54), comprising roughly 60–65% of cases across all segments. Older adults (55+) account for approximately 27–31% of cases, with slightly higher representation in high-duration segments. This pattern indicates that long-term ODSP reliance is modestly associated with older age, but remains broadly consistent across regions.
+Despite expectations of longer persistence among older recipients, ODSP caseloads across all CMA segments are dominated by working-age adults (25–54). This reflects higher inflows into ODSP during prime working years rather than shorter durations among older recipients.
+
+Overall, demographic composition varies little across CMA segments, reinforcing that regional differences in ODSP burden are primarily structural (case volume and duration) rather than demographic.
+
+
+```{r}
+# Prepare family size data by segment
+family_by_segment <- odsp_annual %>%
+  group_by(segment) %>%
+  summarise(
+    fs1 = sum(family_size_1, na.rm = TRUE),
+    fs2 = sum(family_size_2, na.rm = TRUE),
+    fs3_plus = sum(family_size_3_plus, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Convert to proportions
+family_by_segment <- family_by_segment %>%
+  mutate(
+    total = fs1 + fs2 + fs3_plus,
+    prop_fs1 = fs1 / total,
+    prop_fs2 = fs2 / total,
+    prop_fs3_plus = fs3_plus / total
+  )
+
+```
+
+```{r}
+family_by_segment
+```
+Family size composition is highly consistent across ODSP segments.
+Single-person households account for approximately 78–80% of cases in all segments, while households with three or more members remain below 9%. The minimal variation observed suggests that differences in ODSP duration and cumulative system burden are not primarily driven by household size, but rather by factors affecting individual persistence on assistance.
+
+
+# Which CMAs are structurally at higher risk of sustaining longer average ODSP durations, given their observed demographic and household composition.
+
+
+```{r}
+odsp_annual <- odsp_annual %>%
+  mutate(
+    prop_fs1 = family_size_1 / total_cases,
+    prop_fs2 = family_size_2 / total_cases,
+    prop_fs3_plus = family_size_3_plus / total_cases
+  )
+
+```
+
+```{r}
+summary(odsp_annual$prop_fs1)
+summary(odsp_annual$prop_fs2)
+summary(odsp_annual$prop_fs3_plus)
+
+summary(
+  odsp_annual$prop_fs1 +
+  odsp_annual$prop_fs2 +
+  odsp_annual$prop_fs3_plus
+)
+
+```
+## Linear Regression
+
+
+```{r}
+library(dplyr)
+
+model_df <- odsp_annual %>%
+  arrange(cma_name, year) %>%           # Make sure data is sorted by CMA and year
+  group_by(cma_name) %>%                # Do the lag separately for each CMA
+  mutate(
+    lag1_avg_months = lag(avg_months, 1), # Lag of 1 year
+    prop_male = ifelse(total_cases > 0, male_applicant / total_cases, 0)  
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(lag1_avg_months))       # Remove first-year rows for each CMA where lag is NA
+
+
+```
+
+```{r}
+model_df <- model_df %>%
+  select(
+    year,
+    avg_months,          # target
+    lag1_avg_months,     # lag feature
+
+    prop_single,
+    prop_single_parent,
+    prop_age_24_or_less,
+    prop_age_55_plus,
+    prop_fs1,
+    prop_fs3_plus,
+    prop_male
+  )
+
+```
+
+```{r}
+colSums(is.na(model_df))
+```
+
+
+```{r}
+test_years <- c(2022, 2023, 2024)
+
+train_df <- model_df %>% filter(!year %in% test_years)
+test_df  <- model_df %>% filter(year %in% test_years)
+
+```
+
+```{r}
+lm_model <- lm(
+  avg_months ~ .,
+  data = train_df %>% select(-year)
+)
+summary(lm_model)
+
+```
+```{r}
+train_pred_lm <- predict(lm_model, newdata = train_df)
+test_pred_lm  <- predict(lm_model, newdata = test_df)
+
+```
+
+```{r}
+rmse_train_lm <- sqrt(mean((train_pred_lm - train_df$avg_months)^2))
+mae_train_lm  <- mean(abs(train_pred_lm - train_df$avg_months))
+
+rmse_test_lm <- sqrt(mean((test_pred_lm - test_df$avg_months)^2))
+mae_test_lm  <- mean(abs(test_pred_lm - test_df$avg_months))
+
+```
+
+```{r}
+results_lm <- data.frame(
+  Dataset = c("Train", "Test"),
+  RMSE = c(rmse_train_lm, rmse_test_lm),
+  MAE  = c(mae_train_lm,  mae_test_lm)
+)
+
+results_lm
+
+```
+
+
+## Ridge Resression
+
+```{r}
+library(dplyr)
+library(glmnet)
+library(ggplot2)
+
+# -------------------------------
+# Data Preparation
+# -------------------------------
+
+model_df <- odsp_annual %>%
+  arrange(cma_name, year) %>%
+  group_by(cma_name) %>%
+  mutate(
+    lag1_avg_months = lag(avg_months, 1),
+    lag2_avg_months = lag(avg_months, 2),
+    lag3_avg_months = lag(avg_months, 3),
+    prop_male = ifelse(total_cases > 0, male_applicant / total_cases, 0)
+  ) %>%
+  ungroup() %>%
+ 
+  filter(
+    !is.na(lag1_avg_months),
+    !is.na(lag2_avg_months),
+    !is.na(lag3_avg_months)
+  )
+
+model_df <- model_df %>%
+  select(
+    year,
+    avg_months,          # target
+    lag1_avg_months,
+    lag2_avg_months,
+    lag3_avg_months,
+    prop_single,
+    prop_single_parent,
+    prop_age_24_or_less,
+    prop_age_55_plus,
+    prop_fs1,
+    prop_fs3_plus,
+    prop_male
+  )
+
+# Train/Test split
+test_years <- c(2022, 2023, 2024)
+
+# 2. Split
+train_df <- model_df %>% filter(!year %in% c(2022, 2023, 2024))
+test_df  <- model_df %>% filter(year %in% c(2022, 2023, 2024))
+
+
+X_train <- as.matrix(train_df %>% select(-avg_months, -year))
+y_train <- train_df$avg_months
+
+X_test  <- as.matrix(test_df %>% select(-avg_months, -year))
+y_test  <- test_df$avg_months
+
+# -------------------------------
+# Ridge Regression with CV
+# -------------------------------
+set.seed(123)
+
+ridge_model <- cv.glmnet(
+  x = X_train,
+  y = y_train,
+  alpha = 0.5,          
+  standardize = TRUE,
+  nfolds = 5          # 5-fold cross-validation
+)
+
+# Predictions
+train_pred_ridge <- predict(ridge_model, X_train, s = "lambda.min")
+test_pred_ridge  <- predict(ridge_model, X_test, s = "lambda.min")
+
+# Metrics
+rmse_train_ridge <- sqrt(mean((train_pred_ridge - y_train)^2))
+mae_train_ridge  <- mean(abs(train_pred_ridge - y_train))
+
+rmse_test_ridge  <- sqrt(mean((test_pred_ridge - y_test)^2))
+mae_test_ridge   <- mean(abs(test_pred_ridge - y_test))
+
+cat("Train RMSE:", rmse_train_ridge, " | Train MAE:", mae_train_ridge, "\n")
+cat("Test  RMSE:", rmse_test_ridge,  " | Test  MAE:", mae_test_ridge, "\n")
+
+# -------------------------------
+# Plot Predicted vs Actual
+# -------------------------------
+train_plot <- data.frame(actual = y_train, predicted = as.numeric(train_pred_ridge))
+test_plot  <- data.frame(actual = y_test,  predicted = as.numeric(test_pred_ridge))
+
+# Train
+ggplot(train_plot, aes(x = actual, y = predicted)) +
+  geom_point(color = "blue", alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Train: Predicted vs Actual", x = "Actual avg_months", y = "Predicted avg_months") +
+  theme_minimal()
+
+# Test
+ggplot(test_plot, aes(x = actual, y = predicted)) +
+  geom_point(color = "green", alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Test: Predicted vs Actual", x = "Actual avg_months", y = "Predicted avg_months") +
+  theme_minimal()
+
+```
+```{r}
+# Create summary table for Ridge model
+summary_table <- data.frame(
+  Dataset = c("Train", "Test"),
+  RMSE    = c(rmse_train_ridge, rmse_test_ridge),
+  MAE     = c(mae_train_ridge, mae_test_ridge)
+)
+
+summary_table
+
+```
+
+
+```{r}
+library(glmnet)
+library(dplyr)
+
+alphas <- seq(0, 1, by = 0.1)
+
+results <- lapply(alphas, function(a) {
+
+  set.seed(123)
+  model <- cv.glmnet(
+    x = X_train,
+    y = y_train,
+    alpha = a,
+    standardize = TRUE,
+    nfolds = 5
+  )
+
+  train_pred <- predict(model, X_train, s = "lambda.min")
+  test_pred  <- predict(model, X_test,  s = "lambda.min")
+
+  data.frame(
+    alpha = a,
+    rmse_test = sqrt(mean((test_pred - y_test)^2)),
+    mae_test  = mean(abs(test_pred - y_test))
+  )
+})
+
+alpha_results <- bind_rows(results)
+
+alpha_results %>% arrange(rmse_test)
+
+
+```
+Model Comparison
+
+Two predictive models were developed to estimate the average number of months individuals rely on ODSP assistance at the CMA-year level: a baseline Linear Regression model and a regularized Elastic Net model. Both models utilized demographic indicators, including household type, age group proportions, family size distribution, and gender proportion.
+
+Linear Regression (OLS)
+
+The linear regression model served as a baseline. It included only a first-order autoregressive term (lag1_avg_months) alongside the demographic covariates. This choice was made to avoid multicollinearity among higher-order lag terms, which are highly correlated in temporal data, and to provide an interpretable benchmark for comparison.
+
+The performance of the linear model was as follows:
+Dataset	RMSE	MAE
+Train	0.698	0.564
+Test	0.810	0.683
+
+While the model captured some temporal dynamics, the predictive accuracy was limited, particularly on the test set, reflecting its inability to leverage longer temporal memory.
+
+Elastic Net Regression
+
+The Elastic Net model incorporated lag1, lag2, and lag3 along with the same demographic features, allowing the model to capture longer-term temporal dependencies. Regularization controlled for multicollinearity and prevented overfitting. Hyperparameter tuning identified alpha = 0.5 as optimal for minimizing test RMSE.
+
+Performance metrics were:
+
+Dataset	RMSE	MAE
+Train	0.558	0.435
+Test	0.456	0.356
+
+Notably, the test RMSE was lower than the training RMSE, which may reflect temporal smoothing and
+regularization, combined with the fact that the hold-out years had lower variability compared to the training period. Importantly, the model demonstrates higher predictive accuracy and stability compared to the linear baseline.
+
+Comparison and Interpretation
+
+Feature usage: Linear regression included only lag1_avg_months, while Elastic Net leveraged three lag terms, capturing richer temporal dynamics.
+
+Predictive performance: Elastic Net substantially outperformed the linear model in both RMSE and MAE, particularly on the test set.
+
+Regularization benefits: Elastic Net’s combination of L1 and L2 penalties mitigates multicollinearity among lag terms and avoids overfitting, providing more reliable predictions.
+
+In summary, the Elastic Net model represents a methodologically justified extension of the linear baseline, balancing interpretability and predictive accuracy, and effectively capturing both short- and medium-term temporal dependencies in ODSP caseload dynamics.
+
+
+
+```{r}
+# -------------------------------
+# 1. Predict next-year ODSP reliance per CMA
+# -------------------------------
+
+# Compute lags using full time series 
+model_df <- odsp_annual %>%
+  arrange(cma_name, year) %>%
+  group_by(cma_name) %>%
+  mutate(
+    lag1_avg_months = lag(avg_months, 1),
+    lag2_avg_months = lag(avg_months, 2),
+    lag3_avg_months = lag(avg_months, 3),
+    prop_male = ifelse(total_cases > 0, male_applicant / total_cases, 0)
+  ) %>%
+  ungroup()
+
+#Take only the latest year rows
+latest_year <- max(model_df$year)
+future_df <- model_df %>%
+  filter(year == latest_year) %>%
+  select(cma_name, lag1_avg_months, lag2_avg_months, lag3_avg_months,
+         prop_single, prop_single_parent, prop_age_24_or_less, prop_age_55_plus,
+         prop_fs1, prop_fs3_plus, prop_male) %>%
+  filter(!is.na(lag1_avg_months), !is.na(lag2_avg_months), !is.na(lag3_avg_months))
+
+# Predict
+future_df$predicted_avg_months <- as.numeric(
+  predict(ridge_model, as.matrix(future_df %>% select(-cma_name)), s = "lambda.min")
+)
+
+# Rank top CMAs
+top_risk_cmas <- future_df %>%
+  arrange(desc(predicted_avg_months)) %>%
+  select(cma_name, predicted_avg_months)
+
+top_risk_cmas %>% slice(1:10)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Plot
+ggplot(top_risk_cmas, aes(x = reorder(cma_name, predicted_avg_months), 
+                          y = predicted_avg_months, fill = predicted_avg_months)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +  # horizontal bars
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  labs(title = "Top 10 CMAs at Risk of Long-Term ODSP Reliance",
+       x = "",
+       y = "Predicted Average Months on ODSP") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+The top CMAs identified for long-term ODSP reliance are determined based on the predicted average months of assistance for the next year using the Elastic Net regression model. The model incorporates recent trends in each CMA’s ODSP caseload (lag1, lag2, and lag3 average months) along with demographic characteristics such as household type, family size, age distribution, and gender proportion. CMAs appearing at the top of the list are those where the combination of historically high reliance and demographic factors most strongly predicts continued or increased duration of ODSP receipt. In other words, these regions are forecasted to have the highest average months on assistance, reflecting both past patterns and population characteristics that influence long-term dependency risk.
+
+CMAs such as Kingston, Thunder Bay, and Peterborough rank highest in the predicted average months on ODSP primarily because they exhibit consistently high historical reliance across the past three years, which strongly influences the Elastic Net regression model through the lagged average-month variables. These CMAs also tend to have demographic compositions associated with longer durations on assistance, including higher proportions of older applicants, smaller labour markets, and household structures that historically correlate with extended benefit reliance. Because the model penalizes unstable predictors and emphasizes persistent patterns, CMAs with stable, long-term ODSP participation—rather than short-term fluctuations—are systematically ranked higher. Importantly, this ranking reflects predicted continuation of existing trends over a one-year horizon, not a causal assessment of regional policy or economic conditions.
+
+
+```{r}
+# -------------------------------
+# Feature importance from Elastic Net
+# -------------------------------
+
+coef_matrix <- as.matrix(coef(ridge_model, s = "lambda.min"))
+coef_df <- data.frame(
+  feature = rownames(coef_matrix),
+  coefficient = as.numeric(coef_matrix)
+)
+
+# Remove intercept
+coef_df <- coef_df %>% filter(feature != "(Intercept)")
+
+# Order by absolute effect
+coef_df <- coef_df %>%
+  mutate(abs_coeff = abs(coefficient)) %>%
+  arrange(desc(abs_coeff))
+
+print("Feature importance (largest absolute coefficients first):")
+print(coef_df)
+
+# Plot
+ggplot(coef_df, aes(x = reorder(feature, abs_coeff), y = abs_coeff)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Elastic Net Feature Importance",
+       x = "Feature",
+       y = "Absolute Coefficient") +
+  theme_minimal()
+
+```
+
+Elastic Net coefficient analysis indicates that household structure and demographic composition are stronger determinants of long-term ODSP reliance than temporal persistence alone. The proportion of single-parent households emerged as the most influential predictor, followed by gender and age composition, suggesting that structural and caregiving constraints play a central role in prolonged assistance duration. While prior-year reliance exhibits persistence, its relative importance is smaller than that of demographic factors. Family size effects further indicate that smaller household units are associated with longer reliance, whereas larger families appear relatively protective. These results emphasize that geographic risk of long-term ODSP dependency is primarily driven by population composition rather than short-term temporal inertia.
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
