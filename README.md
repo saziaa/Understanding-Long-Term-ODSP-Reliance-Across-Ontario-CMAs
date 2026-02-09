@@ -88,7 +88,7 @@ The model incorporates:
 
 Using the most recent year of available data, the fitted model was used to generate one-year-ahead estimates of average ODSP duration for each CMA. CMAs with higher predicted durations are interpreted as regions where long-term reliance is more likely to persist under prevailing demographic and structural conditions.
 
-The analysis identified a subset of CMAs with consistently higher projected average ODSP duration, including **Kingston, Thunder Bay, and Peterborough**. These elevated projections primarily reflect historical persistence and population composition rather than program performance or individual-level behavior.
+The analysis identified a subset of CMAs with consistently higher projected average ODSP duration, including **Kingston, Thunder Bay, and Peterborough**. These projections reflect historical persistence and demographic composition, rather than program performance or individual-level behavior.
 
 Importantly, these results should be interpreted as region-level risk signals, not causal conclusions. They are intended to support evidence-based planning, early intervention design, and geographically targeted policy responses aimed at reducing prolonged ODSP reliance and improving service outcomes.
 
@@ -107,4 +107,4 @@ These associations reflect regional structural characteristics, not individual-l
 
 Overall, the analysis indicates that long-term ODSP reliance across Ontario CMAs is primarily structural and path-dependent, rather than driven by short-term demographic shifts. While population composition provides important contextual information, historical persistence overwhelmingly shapes future system pressure.
 
-This distinction has direct policy relevance. It suggests that reducing prolonged ODSP reliance will likely require region-specific, long-horizon interventions—such as coordinated employment supports, housing stability initiatives, and health-related service integration—rather than short-term caseload management alone.
+These findings highlight the need for region-specific, long-term interventions—coordinated employment supports, housing stability, and integrated health services rather than focusing solely on short-term caseload management.
